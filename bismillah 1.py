@@ -1,62 +1,81 @@
 import streamlit as st
 import pandas as pd
-from io import BytesIO
+import plotly.express as px
+from datetime import datetime
 
-# Inisialisasi session state untuk menyimpan data jika belum ada
-if 'data' not in st.session_state:
-    st.session_state.data = pd.DataFrame(columns=[
-        "Nama", "Departemen", "Instansi", "Jurusan", "Jalur Magang", "Periode Magang", "Status Magang"
-    ])
+# Konfigurasi halaman
+st.set_page_config(page_title="Dashboard Pemagang PT Terminal Petikemas Surabaya", layout="wide")
 
-st.title("Dashboard Input Data Magang")
+# Fungsi untuk memuat atau menyimpan data
+@st.cache_data
+def load_data():
+    return pd.DataFrame(columns=["Nama", "Jurusan", "Institut", "Departemen", "Periode Mulai", "Periode Selesai", "Status"])
 
-# --- UPLOAD FILE EXCEL ---
-st.subheader("Upload File Excel")
-uploaded_file = st.file_uploader("Upload file Excel", type=["xlsx", "xls"])
+data = load_data()
 
+# Sidebar untuk upload file
+st.sidebar.header("Upload Data")
+uploaded_file = st.sidebar.file_uploader("Upload file Excel atau CSV", type=["xlsx", "csv"])
 if uploaded_file:
-    df_uploaded = pd.read_excel(uploaded_file)
-    st.session_state.data = pd.concat([st.session_state.data, df_uploaded], ignore_index=True)
-    st.success("Data dari file Excel berhasil ditambahkan!")
+    if uploaded_file.name.endswith(".csv"):
+        data = pd.read_csv(uploaded_file)
+    else:
+        data = pd.read_excel(uploaded_file)
+    st.sidebar.success("File berhasil diunggah!")
 
-# --- INPUT DATA MANUAL ---
-st.subheader("Tambah Data Manual")
+# Halaman Input Data
+st.title("Input Data Magang")
 
-with st.form("form_tambah_data"):
-    nama = st.text_input("Nama")
-    departemen = st.text_input("Departemen")
-    instansi = st.text_input("Instansi")
-    jurusan = st.text_input("Jurusan")
-    jalur_magang = st.selectbox("Jalur Magang", ["Reguler", "Kampus Merdeka", "Mandiri"])
-    periode_magang = st.text_input("Periode Magang")
-    status_magang = st.selectbox("Status Magang", ["Aktif", "Selesai", "Dibatalkan"])
-    tambah_data = st.form_submit_button("Add Data")
-    
-    if tambah_data:
+with st.form("input_data_form"):
+    col1, col2 = st.columns(2)
+    with col1:
+        nama = st.text_input("Nama")
+        jurusan = st.text_input("Jurusan")
+        institut = st.text_input("Institut")
+    with col2:
+        departemen = st.text_input("Departemen")
+        periode_mulai = st.date_input("Periode Mulai", value=datetime.today())
+        periode_selesai = st.date_input("Periode Selesai", value=datetime.today())
+    status = st.selectbox("Status", ["Aktif", "Selesai", "Diperpanjang"])
+    submit = st.form_submit_button("Add")
+
+    if submit:
         new_data = pd.DataFrame({
             "Nama": [nama],
-            "Departemen": [departemen],
-            "Instansi": [instansi],
             "Jurusan": [jurusan],
-            "Jalur Magang": [jalur_magang],
-            "Periode Magang": [periode_magang],
-            "Status Magang": [status_magang]
+            "Institut": [institut],
+            "Departemen": [departemen],
+            "Periode Mulai": [periode_mulai],
+            "Periode Selesai": [periode_selesai],
+            "Status": [status]
         })
-        st.session_state.data = pd.concat([st.session_state.data, new_data], ignore_index=True)
+        data = pd.concat([data, new_data], ignore_index=True)
         st.success("Data berhasil ditambahkan!")
 
-# --- TAMPILKAN DATA ---
-st.subheader("Tabel Data Magang")
-st.dataframe(st.session_state.data)
+# Halaman Data
+st.title("Data Pemagang")
+data = st.data_editor(data, num_rows="dynamic")
 
-# --- DOWNLOAD DATA ---
-st.subheader("Download Data")
-output = BytesIO()
-st.session_state.data.to_excel(output, index=False, engine='xlsxwriter')
-output.seek(0)
-st.download_button(
-    label="Download Excel",
-    data=output,
-    file_name="data_magang.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+# Halaman Dashboard
+st.title("Dashboard Magang PT TPS")
+col1, col2 = st.columns(2)
+
+with col1:
+    status_filter = st.selectbox("Filter Status", ["Semua"] + list(data["Status"].unique()))
+    periode_filter = st.slider("Pilih Periode Tahun", int(data["Periode Mulai"].dt.year.min()), int(data["Periode Selesai"].dt.year.max()), (2020, 2025))
+
+data_filtered = data.copy()
+if status_filter != "Semua":
+    data_filtered = data_filtered[data_filtered["Status"] == status_filter]
+data_filtered = data_filtered[(data_filtered["Periode Mulai"].dt.year >= periode_filter[0]) & (data_filtered["Periode Selesai"].dt.year <= periode_filter[1])]
+
+with col2:
+    total_pemagang = len(data_filtered)
+    st.metric(label="Total Pemagang", value=total_pemagang)
+
+# Bar chart jumlah magang per departemen
+st.subheader("Jumlah Pemagang per Departemen")
+departemen_count = data_filtered["Departemen"].value_counts().reset_index()
+departemen_count.columns = ["Departemen", "Jumlah"]
+fig = px.bar(departemen_count, x="Departemen", y="Jumlah", text="Jumlah", color="Departemen", height=500)
+st.plotly_chart(fig)
